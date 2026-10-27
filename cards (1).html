@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Print QR Cards</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+  <style>
+    :root { --ink: #1B2A2F; --teal: #1F6F78; --soft: #D5EAEC; --line: #C9D6DA; --bg: #F3F6F7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Atkinson Hyperlegible", Verdana, Arial, sans-serif; }
+    .panel { max-width: 760px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 14px; }
+    h1 { margin: 0; color: var(--teal); }
+    ol { margin: 0; padding-left: 22px; font-size: 18px; line-height: 1.6; }
+    textarea, input { font: inherit; width: 100%; padding: 10px; border: 2px solid var(--line); border-radius: 10px; background: #fff; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .row input { flex: 1; min-width: 140px; }
+    button { font: inherit; font-weight: 700; padding: 12px 20px; border-radius: 12px; border: 2px solid var(--teal); cursor: pointer; }
+    .main { background: var(--teal); color: #fff; }
+    .ghost { background: #fff; color: var(--teal); }
+    .msg { margin: 0; font-weight: 700; }
+    .sheet { display: grid; grid-template-columns: repeat(2, 85.6mm); gap: 6mm; justify-content: center; padding: 16px; }
+    .card { width: 85.6mm; height: 54mm; border: 1px dashed #999; border-radius: 3mm; background: #fff;
+            display: grid; grid-template-columns: 34mm 1fr; align-items: center; gap: 3mm; padding: 4mm; break-inside: avoid; }
+    .card .qr img, .card .qr canvas { width: 32mm !important; height: 32mm !important; }
+    .card b { display: block; font-size: 15pt; line-height: 1.15; }
+    .card span { display: block; font-size: 10pt; margin-top: 2mm; }
+    .card small { display: block; font-size: 7pt; color: #666; margin-top: 2mm; font-family: Consolas, monospace; }
+    @media print {
+      body { background: #fff; }
+      .panel { display: none; }
+      .sheet { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Print QR cards</h1>
+    <ol>
+      <li>In Excel, open the <b>Interns</b> tab.</li>
+      <li>Select the <b>Card code</b> and <b>Name</b> cells for the interns you want, and copy.</li>
+      <li>Click in the box below and paste.</li>
+      <li>Press <b>Make cards</b>, then print (Ctrl + P).</li>
+    </ol>
+    <textarea id="paste" rows="6" placeholder="Paste here, for example:&#10;fwa34e    Jordan K"></textarea>
+    <p>Or type one card:</p>
+    <div class="row">
+      <input id="name" placeholder="Name" aria-label="Name">
+      <input id="code" placeholder="Card code" aria-label="Card code">
+    </div>
+    <div class="row">
+      <button class="main" id="make" type="button">Make cards</button>
+      <button class="ghost" id="clear" type="button">Clear</button>
+    </div>
+    <p class="msg" id="msg" aria-live="polite"></p>
+  </div>
+  <div class="sheet" id="sheet"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    const appUrl = new URL("./", location.href).href;
+    const CODE = /^[a-z2-9]{6}$/;
+    const sheet = document.getElementById("sheet");
+
+    // Reads pasted Excel rows: finds the 6 character code and treats the other text as the name
+    function readRows(text) {
+      return text.split(/\r?\n/).map((line) => {
+        const cells = line.split("\t").map((c) => c.trim()).filter(Boolean);
+        const code = cells.find((c) => CODE.test(c));
+        const name = cells.find((c) => c !== code && !c.startsWith("http"));
+        return code && name ? { code, name } : null;
+      }).filter(Boolean);
+    }
+
+    function card({ code, name }) {
+      const c = document.createElement("div"); c.className = "card";
+      const q = document.createElement("div"); q.className = "qr";
+      const t = document.createElement("div");
+      const b = document.createElement("b"); b.textContent = name;
+      const s = document.createElement("span"); s.textContent = "Scan me after every shift";
+      const m = document.createElement("small"); m.textContent = "Project SEARCH  " + code;
+      t.append(b, s, m); c.append(q, t); sheet.append(c);
+      new QRCode(q, { text: appUrl + "?id=" + code, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.M });
+    }
+
+    document.getElementById("make").addEventListener("click", () => {
+      const rows = readRows(document.getElementById("paste").value);
+      const n = document.getElementById("name").value.trim(), k = document.getElementById("code").value.trim().toLowerCase();
+      if (n && CODE.test(k)) rows.push({ name: n, code: k });
+      rows.forEach(card);
+      document.getElementById("msg").textContent = rows.length
+        ? `${sheet.children.length} card(s) ready. Press Ctrl + P to print.`
+        : "No cards made. Check you copied the Card code and Name cells.";
+    });
+    document.getElementById("clear").addEventListener("click", () => {
+      sheet.replaceChildren(); document.getElementById("msg").textContent = "";
+      document.getElementById("paste").value = "";
+    });
+  </script>
+</body>
+</html>
