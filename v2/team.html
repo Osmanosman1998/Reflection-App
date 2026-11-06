@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Team Check</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+  <style>
+    :root {
+      --bg: #F6F3EE; --card: #FFFFFF; --ink: #1E1A1C; --muted: #5E5459; --line: #D9D0C7;
+      --brand: #7A1F3D; --brand-soft: #F3E3E9; --gold: #C9A227; --gold-soft: #FBF3D6;
+      --good: #2E7D4F; --good-soft: #DDF0E4; --warn: #9A6B00; --warn-soft: #FBF0D2; --bad: #B03A2E; --bad-soft: #F8E0DC;
+      --font: "Atkinson Hyperlegible", Verdana, Arial, sans-serif; color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #171315; --card: #221C1F; --ink: #F3EEF0; --muted: #BBAFB4; --line: #3D3337;
+        --brand: #E48AA8; --brand-soft: #3A2129; --gold: #E5C55A; --gold-soft: #352C14;
+        --good: #7DD3A0; --good-soft: #1D3527; --warn: #F0C55B; --warn-soft: #3A3018; --bad: #F19A8F; --bad-soft: #3D2320;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #171315; --card: #221C1F; --ink: #F3EEF0; --muted: #BBAFB4; --line: #3D3337;
+      --brand: #E48AA8; --brand-soft: #3A2129; --gold: #E5C55A; --gold-soft: #352C14;
+      --good: #7DD3A0; --good-soft: #1D3527; --warn: #F0C55B; --warn-soft: #3A3018; --bad: #F19A8F; --bad-soft: #3D2320;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 18px/1.45 var(--font); }
+    main { max-width: 720px; margin: 0 auto; padding: 16px 16px 48px; }
+    h1 { font-size: 26px; margin: 8px 0 4px; color: var(--brand); }
+    h2 { font-size: 21px; margin: 0; }
+    p { margin: 6px 0; }
+    .muted { color: var(--muted); }
+    .banner { background: var(--gold-soft); border: 1px solid var(--gold); border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .pill { font-size: 15px; padding: 4px 10px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+    .pill.done { background: var(--good-soft); color: var(--good); }
+    button { font: inherit; cursor: pointer; }
+    .btn { background: var(--brand); color: #fff; border: 0; border-radius: 12px; padding: 12px 18px; font-weight: 700; min-height: 48px; }
+    .btn.ghost { background: transparent; color: var(--brand); border: 2px solid var(--brand); }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .area { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+    .area-title { font-weight: 700; }
+    .target { margin: 2px 0 8px; }
+    .scores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .scores button { border: 2px solid var(--line); background: var(--card); color: var(--ink); border-radius: 10px; padding: 8px 2px; font-size: 14px; min-height: 64px; }
+    .scores button b { display: block; font-size: 20px; }
+    .scores button[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); }
+    .words { background: var(--bg); border-radius: 10px; padding: 10px 12px; margin: 10px 0 6px; font-style: italic; }
+    .seen { display: flex; flex-wrap: wrap; gap: 6px; }
+    .seen button { border: 2px solid var(--line); background: var(--card); color: var(--ink); border-radius: 99px; padding: 6px 12px; font-size: 15px; min-height: 40px; }
+    .seen button[aria-pressed="true"] { border-color: var(--good); background: var(--good-soft); }
+    textarea { width: 100%; font: inherit; border: 2px solid var(--line); border-radius: 10px; padding: 10px; min-height: 80px; background: var(--card); color: var(--ink); }
+    .copy { white-space: pre-wrap; background: var(--good-soft); border-radius: 10px; padding: 12px; font-size: 16px; }
+    .error { background: var(--bad-soft); color: var(--bad); border-radius: 10px; padding: 10px 12px; }
+    .key { font-size: 15px; }
+    @media (max-width: 480px) { .scores button { font-size: 12px; } }
+  </style>
+</head>
+<body>
+<main id="app"><p class="muted">Loading…</p></main>
+<script src="config.js?v=2.0"></script>
+<script>
+// Team check page. One check per intern per fortnight: the first one saved wins.
+const SCALE = [[1, "No focus"], [2, "Emerging"], [3, "Partly sustained"], [4, "Mostly sustained"], [5, "Fully sustained"]];
+const SEEN = ["✓ Seen independently", "Seen with prompts", "Partly seen", "Not seen yet"];
+const AREAS = CONFIG.areas;
+const app = document.getElementById("app");
+const code = (new URLSearchParams(location.search).get("t") || "").trim().toLowerCase();
+const PREVIEW = !CONFIG.teamUrl;
+let data = null;
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v === true ? "" : v);
+  }
+  kids.flat().forEach((k) => k != null && e.append(k.nodeType ? k : document.createTextNode(String(k))));
+  return e;
+}
+async function call(url, body, ms = 45000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body), signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, body: j };
+  } finally { clearTimeout(t); }
+}
+const fmt = (d) => { const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }); };
+
+async function load() {
+  if (!code && !PREVIEW) { app.replaceChildren(el("h1", {}, "Team check"), el("p", {}, "Please open this page from your team QR code or link.")); return; }
+  if (PREVIEW) { data = demo(); return render(); }
+  try {
+    const r = await call(CONFIG.teamUrl, { teamCode: code });
+    if (r.status === 404 || r.status === 403) { app.replaceChildren(el("h1", {}, "Team check"), el("p", {}, "This code is not recognised. Please ask Osman for your link.")); return; }
+    data = r.body; render();
+  } catch (e) {
+    app.replaceChildren(el("h1", {}, "Team check"), el("p", { class: "error" }, "Could not connect. Check your internet and try again."), el("button", { class: "btn", onclick: load }, "Try again"));
+  }
+}
+
+function render() {
+  const todo = data.interns.filter((i) => !i.doneBy), done = data.interns.filter((i) => i.doneBy);
+  app.replaceChildren(
+    el("h1", {}, "Team check"),
+    el("p", {}, `Hello ${data.name.split(" ")[0]}. ${data.site === "All sites" ? "All sites" : data.site}.`),
+    data.check ? el("div", { class: "banner" }, el("b", {}, data.check), data.dueBy ? `, due by ${fmt(data.dueBy)}.` : ".",
+                    el("p", { class: "key" }, `${done.length} of ${data.interns.length} interns checked. One check per intern: the first one saved counts.`))
+               : el("div", { class: "banner" }, "No check is due right now (holiday)."),
+    PREVIEW ? el("p", { class: "error" }, "Preview: nothing is saved.") : null,
+    ...todo.map(card),
+    done.length ? el("h2", { style: "margin-top:20px" }, "Done") : null,
+    ...done.map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i.doneBy)))
+  );
+}
+
+function card(i) {
+  const st = { scores: {}, seen: {}, comment: "" };
+  const box = el("section", { class: "card" });
+  const head = el("div", { class: "row" }, el("h2", {}, i.name), el("span", { class: "pill" }, "Due"));
+  const open = el("button", { class: "btn ghost", onclick: () => { open.remove(); box.append(form()); } }, "Start check");
+  box.append(head, el("p", { class: "muted" }, i.rotation || ""), open);
+
+  function form() {
+    const f = el("div");
+    AREAS.forEach((a, n) => {
+      const t = i.targets[n]; if (!t) return;
+      const btns = SCALE.map(([v, label]) => el("button", { type: "button", "aria-pressed": "false",
+        onclick: (e) => { st.scores[n] = v; [...e.currentTarget.parentNode.children].forEach((b) => b.setAttribute("aria-pressed", b === e.currentTarget)); } },
+        el("b", {}, v), label));
+      const words = (i.words && i.words[n]) || "";
+      const seen = words ? el("div", { class: "seen" }, ...SEEN.map((s) => el("button", { type: "button", "aria-pressed": "false",
+        onclick: (e) => { st.seen[n] = s; [...e.currentTarget.parentNode.children].forEach((b) => b.setAttribute("aria-pressed", b === e.currentTarget)); } }, s))) : null;
+      f.append(el("div", { class: "area" },
+        el("div", { class: "area-title" }, `${a.icon} ${a.name}`),
+        el("p", { class: "target" }, t),
+        el("div", { class: "scores", role: "group", "aria-label": "Score" }, ...btns),
+        words ? el("p", { class: "muted", style: "margin-top:10px" }, `${i.name.split(" ")[0]} said they did this:`) : el("p", { class: "muted", style: "margin-top:10px" }, "No words from the intern this fortnight."),
+        words ? el("div", { class: "words" }, words) : null,
+        seen));
+    });
+    const ta = el("textarea", { placeholder: "Comment (optional)", oninput: (e) => (st.comment = e.target.value) });
+    const msg = el("div");
+    const save = el("button", { class: "btn", onclick: async () => {
+      const need = AREAS.map((a, n) => n).filter((n) => i.targets[n] && !st.scores[n]);
+      if (need.length) { msg.replaceChildren(el("p", { class: "error" }, "Please give a score for every target.")); return; }
+      save.disabled = true; msg.replaceChildren(el("p", { class: "muted" }, "Saving…"));
+      const rec = { teamCode: code, internId: i.internId, check: data.check, comment: st.comment.trim() };
+      AREAS.forEach((a, n) => { rec["score" + (n + 1)] = st.scores[n] || ""; rec["evidence" + (n + 1)] = (i.words && i.words[n]) || ""; rec["seen" + (n + 1)] = st.seen[n] || ""; });
+      let r;
+      if (PREVIEW) r = { status: 200, body: {} };
+      else { try { r = await call(CONFIG.saveCheckUrl, rec); } catch (e) { r = { status: 0 }; } }
+      if (r.status === 409) { i.doneBy = r.body.doneBy || "someone else"; render(); return; }
+      if (r.status !== 200) { save.disabled = false; msg.replaceChildren(el("p", { class: "error" }, "Not saved. Check your internet and press Save again.")); return; }
+      i.doneBy = data.name;
+      box.replaceChildren(el("div", { class: "row" }, el("h2", {}, i.name), el("span", { class: "pill done" }, "Saved")),
+        el("p", {}, "Copy this into Evidence for Learning (it is also on the Evidence for Learning tab in Excel):"),
+        el("div", { class: "copy" }, entry(i, rec)),
+        el("button", { class: "btn ghost", style: "margin-top:10px", onclick: (e) => { navigator.clipboard && navigator.clipboard.writeText(entry(i, rec)); e.target.textContent = "Copied"; } }, "Copy"));
+    } }, "Save check");
+    f.append(el("div", { class: "area" }, ta), msg, el("div", { style: "margin-top:12px" }, save));
+    return f;
+  }
+  return box;
+}
+
+function entry(i, rec) {
+  const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  let s = `${i.name}, Project SEARCH, ${d}. Checked by ${data.name}.`;
+  AREAS.forEach((a, n) => {
+    if (!i.targets[n]) return;
+    const ev = rec["evidence" + (n + 1)], seen = rec["seen" + (n + 1)];
+    s += `\n${a.name}: ${ev ? `'${ev}' (${seen || "not confirmed"}). ` : ""}Team score ${rec["score" + (n + 1)]} out of 5.`;
+  });
+  if (rec.comment) s += `\nComment: ${rec.comment}`;
+  return s;
+}
+
+function demo() {
+  return { name: "Helen Gillan", site: "QMUL", check: "Autumn 2 2026, check 1", dueBy: new Date(Date.now() + 5 * 864e5).toISOString(),
+    interns: [
+      { internId: "PS001", name: "Alex (example)", rotation: "Post room", targets: ["Ask for help when I am stuck at work", "Travel to placement on my own", "Drink water and eat lunch at break", "Say good morning to my team"],
+        words: ["I asked when I was not sure where a letter went", "I travelled on my own", "", "I said good morning to my team"] },
+      { internId: "PS004", name: "Priya (example)", rotation: "Library", targets: ["Follow a three step instruction", "", "", ""], words: ["", "", "", ""] },
+      { internId: "PS002", name: "Jordan (example)", doneBy: "Arthur Davis", targets: [] }
+    ] };
+}
+load();
+</script>
+</body>
+</html>
