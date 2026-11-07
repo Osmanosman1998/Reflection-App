@@ -44,12 +44,13 @@ const CONFIG = {
   ],
 
   // Which version of the app each support level sees. Interns never see their level.
-  versionForLevel: { 1: "supported", 2: "middle", 3: "independent" },
+  // Pre-SIP gets word banks and a word minimum. SIP gets sentence starters that change with their score.
+  versionForLevel: { pre: "supported", sip: "independent" },
+  preSipMinWords: 8,
 
   // Word goals. Interns can carry on below the goal after one nudge.
   wordGoals: {
-    middle:      { follow: 8, target: 8 },
-    independent: { well: 40, hard: 40, next: 30, learned: 40, target: 20 }
+    independent: { well: 25, hard: 25, next: 20, learned: 25, target: 15 }
   },
 
 
@@ -62,7 +63,33 @@ const CONFIG = {
            tbh: "to be honest", ya: "you", yeah: "yes", dunno: "don't know", lol: "a full sentence", omg: "a full sentence" },
 
   // Word banks for the supported version (and the first step of the middle version)
+  // "What did I do?" for each target, by the score the intern gave: 1 to 2 = low, 3 = mid, 4 to 5 = high
+  targetNotes: {
+    pre: {
+      low:  { ask: "What made it hard? Tap an idea or type your own." },
+      mid:  { ask: "What did I do, and what did I still need help with?" },
+      high: { ask: "What did I do? Tap an idea or type your own." }
+    },
+    sip: {
+      low:  { starter: "This was difficult for me because...",
+              prompts: ["What made it difficult?", "What help did I need?", "What could make it easier next time?"] },
+      mid:  { starter: "I did part of this myself. I still needed help with...",
+              prompts: ["What did I do on my own?", "What did I need help with?", "What would help me do more on my own?"] },
+      high: { starter: "I did this well because...",
+              prompts: ["What did I do {when}?", "How did I do it?", "What could I try next to challenge myself?"] }
+    }
+  },
+
   banks: {
+    // General phrases by score group, used when a rotation has no word bank for that score yet
+    targetBand: {
+      low:  ["I needed someone to help me", "I did not understand what to do", "I felt worried", "It was too busy",
+             "I forgot what to do next", "I needed a reminder", "I found it hard to start", "I was not sure who to ask"],
+      mid:  ["I did some of it on my own", "I asked for help when I was stuck", "I needed a little reminder",
+             "I followed the instructions", "I checked with my supervisor", "I finished part of it myself"],
+      high: ["I did it on my own", "I did not need any help", "I remembered what to do", "I finished it on time",
+             "I checked my work", "I felt confident"]
+    },
     well: ["I was on time", "I finished my tasks", "I worked on my own", "I asked for help when I needed it",
            "I talked to my team", "I stayed calm", "I followed the instructions", "I checked my work",
            "I used my checklist", "I helped someone"],

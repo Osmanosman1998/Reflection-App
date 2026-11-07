@@ -99,8 +99,12 @@ function remember(t) {
 
 // Turns a row from the Excel "Questions" table into what the app needs
 const QTYPES = { "Typed answer": "text", "Tap one option": "choose", "1 to 5 scale": "scale" };
-const WHO = { "Everyone": [1, 2, 3], "Level 1 only": [1], "Level 2 only": [2], "Level 3 only": [3],
-              "Levels 1 and 2": [1, 2], "Levels 2 and 3": [2, 3] };
+// Two support levels: Pre-SIP ("pre") and SIP ("sip"). Old numbers still work: 1 is Pre-SIP, 2 and 3 are SIP.
+const levelKey = (v) => (/pre/i.test(String(v)) || String(v).trim() === "1" ? "pre" : "sip");
+const levelName = (k) => (k === "pre" ? "Pre-SIP" : "SIP");
+const WHO = { "Everyone": ["pre", "sip"], "Pre-SIP only": ["pre"], "SIP only": ["sip"],
+              "Level 1 only": ["pre"], "Level 2 only": ["sip"], "Level 3 only": ["sip"],
+              "Levels 1 and 2": ["pre", "sip"], "Levels 2 and 3": ["sip"] };
 function normaliseQuestion(q) {
   // Accepts a raw Excel row (ID, Type, Question, Options, Who sees it) or the preview shape
   const raw = { id: q.ID ?? q.id, type: q.Type ?? q.type, text: q.Question ?? q.text, site: q.Site ?? q.site,
@@ -109,7 +113,7 @@ function normaliseQuestion(q) {
   if (!raw.text || !["text", "choose", "scale"].includes(type)) return null;
   const options = String(raw.options || "").split(";").map((o) => o.trim()).filter(Boolean);
   if (type === "choose" && !options.length) return null;
-  return { id: String(raw.id), type, text: String(raw.text), options, levels: WHO[String(raw.who || "").trim()] || [1, 2, 3],
+  return { id: String(raw.id), type, text: String(raw.text), options, levels: WHO[String(raw.who || "").trim()] || ["pre", "sip"],
            site: String(raw.site || "").trim(), required: type !== "text" };
 }
 
@@ -118,7 +122,7 @@ function fromExcel(p) {
   if (!p || !p.intern) return p;
   const i = p.intern;
   return {
-    name: i["Name"], site: i["Site"], level: i["Support level"], rotation: i["Current rotation"], internId: i["Intern ID"] || "",
+    name: i["Name"], site: i["Site"], level: levelKey(i["Support level"]), rotation: i["Current rotation"], internId: i["Intern ID"] || "",
     targets: CONFIG.areas.map((a) => i[a.column]),
     rotations: (p.rotations || []).map((r) => (typeof r === "string" ? r : r["Rotation"])),
     questions: p.questions || [],
@@ -159,7 +163,7 @@ async function loadProfile(token) {
     internId: String(p.internId || ""),
     name: String(p.name),
     site: p.site || "",
-    level: Number(p.level) || 2,
+    level: levelKey(p.level),
     rotation: p.rotation || "",
     targets: CONFIG.areas.map((a, i) => (p.targets && p.targets[i]) || ""),
     rotations: (p.rotations || []).filter(Boolean),
@@ -209,7 +213,7 @@ async function start(token) {
   if (profile && profile.offline) { if (!PREVIEW) remember(token); return showOffline(token); }
   if (!profile) return showNoCard();
   if (!PREVIEW) { remember(token); if (!profile.fromCache) moveWaitingToCard(profile); }
-  version = CONFIG.versionForLevel[profile.level] || CONFIG.versionForLevel[2] || "middle";
+  version = CONFIG.versionForLevel[profile.level] || "independent";
   answers.rotation = profile.rotation;
   // One reflection per day: if today and the last shift are both done, there is nothing to do
   const open = dayChoices().filter((c) => !c.done);
@@ -322,13 +326,24 @@ function readWordBanks(rows) {
     const rot = String(r["Rotation"] ?? r.rotation ?? "").trim(), area = String(r["Area"] ?? r.area ?? "").trim();
     const i = CONFIG.areas.findIndex((a) => a.name.toLowerCase() === area.toLowerCase());
     const phrases = String(r["Phrases"] ?? r.phrases ?? "").split(";").map((x) => x.trim().replace(/\.$/, "")).filter(Boolean);
-    if (rot && i >= 0 && phrases.length) (out[rot.toLowerCase()] = out[rot.toLowerCase()] || {})[i] = phrases;
+    const sc = String(r["Score"] ?? r.score ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    const band = sc === "1 to 2" ? "low" : sc === "3" ? "mid" : sc === "4 to 5" ? "high" : "all";
+    if (rot && i >= 0 && phrases.length) {
+      const a = (out[rot.toLowerCase()] = out[rot.toLowerCase()] || {});
+      (a[i] = a[i] || {})[band] = phrases;
+    }
   });
   return out;
 }
-function targetBank(i) {
+// Score groups: 1 to 2 = low, 3 = mid, 4 to 5 = high
+const bandOf = (score) => (score <= 2 ? "low" : score === 3 ? "mid" : "high");
+// Phrases for "What did I do?": this rotation's phrases for the score group, then general phrases for the score group
+function targetBank(i, band) {
   const rot = profile.wordBanks[String(answers.rotation || "").toLowerCase()];
-  return (rot && rot[i]) || CONFIG.banks.target[i] || [];
+  const mine = rot && rot[i] ? [...(rot[i][band] || []), ...(rot[i].all || [])] : [];
+  const general = CONFIG.banks.targetBand[band] || [];
+  const area = rot && rot[i] ? [] : (band === "low" ? [] : CONFIG.banks.target[i] || []);
+  return [...new Set([...mine, ...general, ...area])].slice(0, 10);
 }
 
 // ---------- Writing check: full sentences, capital letters and full stops ----------
@@ -455,6 +470,10 @@ function textBlock(opts) {
           el("button", { class: "btn back small", type: "button", onclick: () => area.focus() }, "Fix it"),
           el("button", { class: "btn main small", type: "button", onclick: () => { nudged["w_" + opts.key] = true; document.getElementById("nextBtn").click(); } }, "Carry on"))
       ].filter(Boolean));
+      hint.classList.add("nudge"); hint.hidden = false; area.focus(); return false;
+    }
+    if (opts.min && n > 0 && n < opts.min) {
+      hint.textContent = `Please write at least ${opts.min} words. You have ${n}. Tell us a little more.`;
       hint.classList.add("nudge"); hint.hidden = false; area.focus(); return false;
     }
     if (opts.goal && n < opts.goal && n > 0 && !nudged[opts.key]) {
@@ -596,7 +615,7 @@ const SCREENS = {
 
   well: () => {
     if (version === "supported") return questionScreen("Something I did well", "Tap the ideas that are true.", [
-      textBlock({ key: "wellDone", starter: "I am proud that I...", bank: CONFIG.banks.well, required: true })]);
+      textBlock({ key: "wellDone", starter: "I am proud that I...", bank: CONFIG.banks.well, required: true, min: CONFIG.preSipMinWords })]);
     if (version === "middle") return questionScreen("Something I did well", "Tap an idea or type your own.", [
       textBlock({ key: "wellDone", starter: "I am proud that I...", bank: CONFIG.banks.well.slice(0, 6), required: true }),
       textBlock({ key: "wellMore", starter: "Tell me more. How did you do it?", required: true, goal: goals().follow })]);
@@ -642,7 +661,7 @@ const SCREENS = {
 
   next: () => {
     if (version === "supported") return questionScreen("What will I try next time?", "Tap one idea.", [
-      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next, required: true })]);
+      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next, required: true, min: CONFIG.preSipMinWords })]);
     if (version === "middle") return questionScreen("What will I try next time?", "Tap an idea or type your own.", [
       textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next.slice(0, 6), required: true }),
       textBlock({ key: "nextHow", starter: "How will you do that?", required: true, goal: goals().follow })]);
@@ -740,26 +759,37 @@ function targetScreen(i) {
     el("button", { class: `scale-btn s${s.n}`, type: "button", "aria-pressed": String(answers[key + "Score"] === s.n),
       onclick: (e) => {
         answers[key + "Score"] = s.n;
+        showNote(s.n);
         scale.querySelectorAll(".scale-btn").forEach((b) => b.setAttribute("aria-pressed", String(b === e.currentTarget)));
         hint.hidden = true;
       } },
       el("b", {}, String(s.n)), el("span", {}, s.says))));
   const hint = el("p", { class: "hint", hidden: true }, "Tap a number.");
-  const blocks = [];
-  const bank = targetBank(i);
-  if (version === "supported") blocks.push(textBlock({ key: key + "Note", starter: "What did I do?", bank, required: true }));
-  if (version === "middle") blocks.push(textBlock({ key: key + "Note", starter: "What did I do?", bank: bank.slice(0, 6), required: true, goal: goals().target }));
-  if (version === "independent") blocks.push(textBlock({ key: key + "Note", starter: `What did I do? Give an example from ${dayWord() === "today" ? "today" : "that shift"}.`, required: true, goal: goals().target,
-    prompts: ["What did you do?", "How did you do it?", "Did anyone help you?"] }));
+  // The "What did I do?" box changes with the score the intern gives: struggle words for 1 to 2, some help for 3, doing well for 4 to 5
+  const holder = el("div", { class: "note-holder" });
+  const noteBox = { current: null, check: () => (noteBox.current ? noteBox.current.check() : true) };
+  const showNote = (score) => {
+    const band = bandOf(score), pre = version === "supported";
+    const when = dayWord() === "today" ? "today" : "that shift";
+    const q = CONFIG.targetNotes[pre ? "pre" : "sip"][band];
+    answers[key + "Starter"] = pre ? "" : q.starter;
+    const opts = pre
+      ? { key: key + "Note", starter: q.ask, bank: targetBank(i, band), required: true, min: CONFIG.preSipMinWords }
+      : { key: key + "Note", starter: q.starter, required: true, goal: goals().target, prompts: q.prompts.map((t) => t.replace("{when}", when)) };
+    noteBox.current = textBlock(opts);
+    holder.replaceChildren(noteBox.current);
+  };
+  if (answers[key + "Score"]) showNote(answers[key + "Score"]);
+  const blocks = [noteBox];
   return el("section", { class: "screen" },
     el("p", { class: "eyebrow" }, `My target ${profile.targets.slice(0, i + 1).filter(Boolean).length} of ${profile.targets.filter(Boolean).length}`),
     el("p", { class: "area" }, el("span", { "aria-hidden": "true" }, CONFIG.areas[i].icon), CONFIG.areas[i].name),
     el("div", { class: "target-text" }, profile.targets[i] || "Target to be added"),
     el("h1", {}, `How did I do ${dayWord()}?`),
-    scale, hint, blocks,
+    scale, hint, holder,
     nav({ onNext: () => {
       if (!answers[key + "Score"]) { hint.hidden = false; return false; }
-      return blocks.every((b) => b.check());
+      return noteBox.check();
     } })
   );
 }
@@ -795,7 +825,7 @@ function buildRecord() {
     minutes: Math.max(1, Math.round((finished - new Date(answers.started)) / 60000)),
     name: profile.name,
     site: profile.site,
-    level: profile.level,
+    level: levelName(profile.level),
     appMode: version,
     rotation: answers.rotation,
     rating: answers.rating,
@@ -803,10 +833,10 @@ function buildRecord() {
     safe: answers.safe || "", wantsTalk: answers.safe && answers.safe !== "Yes" ? (answers.wantsTalk || "") : "",
     safetyNote: answers.safe && answers.safe !== "Yes" ? safe(answers.safetyNote) : "",
     start1: answers.start1 || "", start2: answers.start2 || "", start3: answers.start3 || "", start4: answers.start4 || "",
-    target1: profile.targets[0] || "", t1Score: answers.t1Score || "", t1Note: safe(answers.t1Note),
-    target2: profile.targets[1] || "", t2Score: answers.t2Score || "", t2Note: safe(answers.t2Note),
-    target3: profile.targets[2] || "", t3Score: answers.t3Score || "", t3Note: safe(answers.t3Note),
-    target4: profile.targets[3] || "", t4Score: answers.t4Score || "", t4Note: safe(answers.t4Note),
+    target1: profile.targets[0] || "", t1Score: answers.t1Score || "", t1Note: withStarter(answers.t1Starter, answers.t1Note) || safe(answers.t1Note),
+    target2: profile.targets[1] || "", t2Score: answers.t2Score || "", t2Note: withStarter(answers.t2Starter, answers.t2Note) || safe(answers.t2Note),
+    target3: profile.targets[2] || "", t3Score: answers.t3Score || "", t3Note: withStarter(answers.t3Starter, answers.t3Note) || safe(answers.t3Note),
+    target4: profile.targets[3] || "", t4Score: answers.t4Score || "", t4Note: withStarter(answers.t4Starter, answers.t4Note) || safe(answers.t4Note),
     checkIn1: answers.ci1 || "", checkIn2: answers.ci2 || "", checkIn3: answers.ci3 || "", checkIn4: answers.ci4 || "",
     wellDone: withStarter("I am proud that I...", answers.wellDone), wellMore: safe(answers.wellMore),
     difficult: withStarter("I found it hard when...", answers.difficult), difficultMore: safe(answers.difficultMore),
@@ -899,7 +929,7 @@ function recordPanel() {
 // ---------- Preview switcher ----------
 function previewBar() {
   if (!PREVIEW) return;
-  const labels = { "demo-a7k2": "Level 1, supported", "demo-m4p9": "Level 2, middle", "demo-x3r8": "Level 3, independent" };
+  const labels = { "demo-a7k2": "Pre-SIP", "demo-x3r8": "SIP" };
   const bar = el("div", { class: "preview-bar" },
     el("span", {}, "Preview as:"),
     Object.entries(labels).map(([t, l]) => el("button", { type: "button", "data-t": t, onclick: (e) => {
