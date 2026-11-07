@@ -225,7 +225,7 @@ async function start(token) {
     if (!hasSeen(profile.targets[i])) targetSteps.push("s" + i);
     targetSteps.push("t" + i);
   });
-  steps = ["hello", "day", "rotation", "rating", "safe", "safe2", ...targetSteps, "well", "hard", "help", "next"];
+  steps = ["hello", "day", "rotation", "rating", "safe", "safe2", ...targetSteps, "well", "hard", "help", "skills", "next"];
   if (version === "independent") steps.push("learned");
   profile.questions
     .filter((q) => q.levels.includes(profile.level))
@@ -295,6 +295,36 @@ function markDone(day) {
   MEMORY.add(doneKey(day));
   if (!PREVIEW) try { localStorage.setItem(doneKey(day), "1"); } catch (e) { /* storage blocked */ }
 }
+// My progress: the last few shifts' scores, kept on this phone so the intern can see how they are doing
+const histKey = () => "hist:" + (profile.internId || profile.token);
+const HIST_MEMORY = {};
+function readHist() {
+  if (PREVIEW) return HIST_MEMORY[histKey()] || [];
+  try { return JSON.parse(localStorage.getItem(histKey())) || []; } catch (e) { return []; }
+}
+function saveHist() {
+  const h = readHist().filter((x) => x.day !== answers.day);
+  h.push({ day: answers.day, s: [1, 2, 3, 4].map((n) => answers["t" + n + "Score"] || 0) });
+  h.sort((a, b) => (a.day < b.day ? -1 : 1));
+  const keep = h.slice(-6);
+  if (PREVIEW) HIST_MEMORY[histKey()] = keep;
+  else try { localStorage.setItem(histKey(), JSON.stringify(keep)); } catch (e) { /* storage blocked */ }
+}
+const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+function progressPanel() {
+  const h = readHist();
+  if (!h.length) return null;
+  const now = h[h.length - 1], before = h.length > 1 ? h[h.length - 2] : null;
+  const rows = CONFIG.areas.map((a, i) => {
+    if (!profile.targets[i] || !now.s[i]) return null;
+    const diff = before && before.s[i] ? now.s[i] - before.s[i] : null;
+    const note = diff === null ? "" : diff > 0 ? " ⬆️ Up from last time. Well done!" : diff < 0 ? " ⬇️ A bit lower than last time. That is okay, keep trying." : " ➡️ The same as last time.";
+    return el("div", { class: "progress-row" }, el("b", {}, a.icon + " " + a.name),
+      el("div", { class: "stars", "aria-label": `${now.s[i]} out of 5` }, stars(now.s[i])), el("span", {}, "This shift. 5 stars means I did it on my own." + note));
+  }).filter(Boolean);
+  return rows.length ? el("div", { class: "remember" }, el("b", {}, "My progress"), ...rows) : null;
+}
+
 function dayChoices() {
   const t = new Date(), l = lastShift();
   return [
@@ -659,6 +689,21 @@ const SCREENS = {
     );
   },
 
+  // Skills the intern used today: one short list for every site and job. Optional.
+  skills: () => {
+    answers.skills = answers.skills || [];
+    const tiles = el("div", { class: "tiles" }, CONFIG.skills.map(([v, e, t]) =>
+      el("button", { class: "tile", type: "button", "aria-pressed": String(answers.skills.includes(v)), onclick: (ev) => {
+        answers.skills = answers.skills.includes(v) ? answers.skills.filter((x) => x !== v) : [...answers.skills, v];
+        ev.currentTarget.setAttribute("aria-pressed", String(answers.skills.includes(v)));
+      } }, el("span", { "aria-hidden": "true" }, e), t)));
+    return el("section", { class: "screen" },
+      el("h1", {}, "Which skills did I use today?"),
+      el("p", { class: "lead" }, "Tap all that you used. You can skip this."),
+      tiles, nav({})
+    );
+  },
+
   next: () => {
     if (version === "supported") return questionScreen("What will I try next time?", "Tap one idea.", [
       textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next, required: true, min: CONFIG.preSipMinWords })]);
@@ -682,6 +727,7 @@ const SCREENS = {
       answers.wantsTalk === "Yes" ? "Someone from the Project SEARCH team will talk to you soon." : "If you change your mind, talk to your job coach or site lead.") : null,
     el("div", { class: "remember" }, el("b", {}, "Remember: "),
       "it is okay to ask for support. You can talk to your job coach, supervisor or workplace buddy."),
+    progressPanel(),
     PREVIEW ? recordPanel() : null,
     el("div", { class: "nav" }, el("button", { class: "btn main", type: "button", onclick: () => start(profile.token) }, "Finish"))
   )
@@ -844,8 +890,9 @@ function buildRecord() {
     nextTime: withStarter("Next shift, I will...", answers.nextTime), nextHow: safe(answers.nextHow),
     learned: safe(answers.learned),
     wordCount: textKeys.reduce((n, k) => n + words(answers[k]), 0),
-    extraAnswers: profile.questions.filter((q) => answers["x_" + q.id] != null)
-      .map((q) => ({ id: q.id, question: safe(q.text), answer: typeof answers["x_" + q.id] === "number" ? answers["x_" + q.id] : safe(answers["x_" + q.id]) }))
+    extraAnswers: (answers.skills && answers.skills.length ? [{ id: "SKILLS", question: "Skills I used", answer: safe(answers.skills.join("; ")) }] : [])
+      .concat(profile.questions.filter((q) => answers["x_" + q.id] != null)
+      .map((q) => ({ id: q.id, question: safe(q.text), answer: typeof answers["x_" + q.id] === "number" ? answers["x_" + q.id] : safe(answers["x_" + q.id]) })))
   };
 }
 
@@ -874,6 +921,7 @@ async function send() {
   answers.record = record;
   markCheckInDone();
   markDone(answers.day);
+  saveHist();
   markSeen();
   if (PREVIEW) {
     answers.saveMsg = "Preview mode, so nothing was saved.";

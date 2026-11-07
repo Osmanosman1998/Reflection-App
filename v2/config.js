@@ -80,6 +80,23 @@ const CONFIG = {
     }
   },
 
+  // Skills an intern can tap after a shift. One short list for every site and job (taken from the department
+  // analyses: cafe, shop, mail room, portering, laboratory wash room, warehouse picking and stowing, offices).
+  skills: [
+    ["Following instructions", "📋", "Following instructions"],
+    ["Asking for help", "🙋", "Asking for help"],
+    ["Keeping to time", "⏰", "Keeping to time"],
+    ["Working carefully", "🎯", "Working carefully and checking"],
+    ["Working at a good pace", "⚡", "Working at a good pace"],
+    ["Talking to people", "💬", "Talking to customers or colleagues"],
+    ["Teamwork", "🤝", "Working in a team"],
+    ["Solving a problem", "🧩", "Solving a problem"],
+    ["Using equipment safely", "🛠️", "Using equipment or a till safely"],
+    ["Lifting and moving safely", "📦", "Lifting and moving things safely"],
+    ["Using a computer", "💻", "Using a computer"],
+    ["Staying calm", "😌", "Staying calm when things change"]
+  ],
+
   banks: {
     // General phrases by score group, used when a rotation has no word bank for that score yet
     targetBand: {
