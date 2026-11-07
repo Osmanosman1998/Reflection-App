@@ -447,9 +447,11 @@ function textBlock(opts) {
     opts.bank.forEach((idea) => {
       const used = () => area.value.includes(idea);
       const c = el("button", { class: "chip", type: "button", "aria-pressed": String(used()), onclick: () => {
-        let parts = area.value.split(". ").map((p) => p.replace(/\.$/, "").trim()).filter(Boolean);
+        // Ideas that continue a starter ("take my break on time") join with "and" so they read as one sentence
+        const glue = opts.fragments ? " and " : ". ";
+        let parts = area.value.replace(/\.$/, "").split(opts.fragments ? / and |\. / : ". ").map((p) => p.replace(/\.$/, "").trim()).filter(Boolean);
         parts = used() ? parts.filter((p) => p !== idea) : [...parts, idea];
-        area.value = parts.length ? parts.join(". ") + "." : "";
+        area.value = parts.length ? parts.join(glue) + "." : "";
         area.dispatchEvent(new Event("input"));
       } }, idea);
       area.addEventListener("input", () => c.setAttribute("aria-pressed", String(used())));
@@ -698,7 +700,7 @@ const SCREENS = {
         ev.currentTarget.setAttribute("aria-pressed", String(answers.skills.includes(v)));
       } }, el("span", { "aria-hidden": "true" }, e), t)));
     return el("section", { class: "screen" },
-      el("h1", {}, "Which skills did I use today?"),
+      el("h1", {}, `Which skills did I use ${dayWord()}?`),
       el("p", { class: "lead" }, "Tap all that you used. You can skip this."),
       tiles, nav({})
     );
@@ -706,9 +708,9 @@ const SCREENS = {
 
   next: () => {
     if (version === "supported") return questionScreen("What will I try next time?", "Tap one idea.", [
-      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next, required: true, min: CONFIG.preSipMinWords })]);
+      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next, fragments: true, required: true, min: CONFIG.preSipMinWords })]);
     if (version === "middle") return questionScreen("What will I try next time?", "Tap an idea or type your own.", [
-      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next.slice(0, 6), required: true }),
+      textBlock({ key: "nextTime", starter: "Next shift, I will...", bank: CONFIG.banks.next.slice(0, 6), fragments: true, required: true }),
       textBlock({ key: "nextHow", starter: "How will you do that?", required: true, goal: goals().follow })]);
     return questionScreen("What will I try next time?", null, [
       textBlock({ key: "nextTime", starter: "Next shift, I will...", required: true, goal: goals().next,
@@ -736,8 +738,10 @@ const SCREENS = {
 function extraScreen(id) {
   const q = profile.questions.find((x) => x.id === id);
   const key = "x_" + id;
+  // A catch-up reflection is about another day, so "today" in a question becomes "on Friday" and so on
+  const qText = q.text.replace(/\btoday\b/gi, dayWord());
   if (q.type === "text") {
-    return questionScreen(q.text, null, [textBlock({ key, starter: "My answer",
+    return questionScreen(qText, null, [textBlock({ key, starter: "My answer",
       bank: version === "independent" ? null : q.options, required: !!q.required,
       goal: version === "independent" ? q.wordGoal : 0 })]);
   }
@@ -750,7 +754,7 @@ function extraScreen(id) {
         box.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === e.currentTarget)));
       } }, s ? [el("b", {}, String(s.n)), el("span", {}, s.says)] : v)));
   return el("section", { class: "screen" },
-    el("h1", {}, q.text),
+    el("h1", {}, qText),
     el("p", { class: "lead" }, "Tap one."),
     box, hint,
     nav({ onNext: () => { if (q.required !== false && answers[key] == null) { hint.hidden = false; return false; } return true; } })
@@ -847,7 +851,7 @@ const safe = (v) => {
   return /^[=+\-@]/.test(t) ? " " + t : t;
 };
 // Saves answers as full sentences, for example "Next shift, I will... check my list."
-const withStarter = (starter, text) => (text ? `${starter} ${safe(text)}` : "");
+const withStarter = (starter, text) => (text ? (starter ? starter + " " : "") + safe(text) : "");
 // Each reflection gets its own ID, so a resend after lost signal is never saved twice
 function newId() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");

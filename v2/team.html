@@ -116,10 +116,11 @@ const doneField = (t) => (t === "team" ? "doneBy" : "mentorDoneBy");
 function fromFlow(b) {
   if (!b || !b.rows) return b;
   const rows = b.rows.filter((x) => x.Name && x.Active === "Yes");
-  return { name: b.name, role: b.role, site: b.site, check: (rows[0] && rows[0].Check) || "", mentorDue: (rows[0] && rows[0].MentorDue) || "", dueBy: (rows[0] && rows[0].DueBy) || "",
+  return { name: b.name, role: b.role, site: b.site, check: (rows[0] && rows[0].Check) || "", mentorDue: (rows[0] && rows[0].MentorDue) || "", halfTerm: (rows[0] && rows[0].HalfTerm) || "", halfTermEnd: (rows[0] && rows[0].HalfTermEnd) || "", dueBy: (rows[0] && rows[0].DueBy) || "",
     interns: rows.map((x) => ({ internId: x.InternID, name: x.Name, site: x.Site, rotation: x.Rotation === "Not set" ? "" : x.Rotation,
       targets: [x.Target1, x.Target2, x.Target3, x.Target4].map((t) => t || ""),
       words: [x.Words1, x.Words2, x.Words3, x.Words4].map((t) => t || ""),
+      scores: [x.InternScore1, x.InternScore2, x.InternScore3, x.InternScore4].map((t) => Number(t) || 0),
       doneBy: x.DoneBy || "", mentorDoneBy: x.MentorDoneBy || "", mentor: x.Mentor || "" })) };
 }
 
@@ -150,14 +151,16 @@ function render() {
     el("p", {}, `Hello ${first(data.name)}. ${data.site === "All sites" ? "All sites" : data.site}.`),
     tabs,
     el("p", { class: "muted" }, T.help),
-    data.check ? el("div", { class: "banner" }, el("b", {}, data.check), data.dueBy ? `, due by ${fmt(data.dueBy)}.` : ".",
+    tab === "mentor" && data.halfTermEnd ? el("div", { class: "banner" }, el("b", {}, `Mentor review, ${data.halfTerm}`), `, due by the end of the half term, ${fmt(data.halfTermEnd)}.`,
+                    el("p", { class: "key" }, mentorWait ? "Nothing to do yet." : `${done.length} of ${pool.length} interns done. One per intern each half term: the first one saved counts.`))
+    : data.check ? el("div", { class: "banner" }, el("b", {}, data.check), data.dueBy ? `, due by ${fmt(data.dueBy)}.` : ".",
                     el("p", { class: "key" }, `${done.length} of ${pool.length} interns done. ${tab === "mentor" ? "One per intern each half term" : "One per intern each fortnight"}: the first one saved counts.`))
                : el("div", { class: "banner" }, "No check is due right now (holiday)."),
     mentorWait ? el("p", { class: "muted" }, "Mentor reviews are only needed at the end of each half term. There is nothing to do yet, thank you.") : null,
     PREVIEW ? el("p", { class: "error" }, "Preview: nothing is saved.") : null,
     ...todo.map((i) => card(i, T)),
-    done.length ? el("h2", { style: "margin-top:20px" }, "Done") : null,
-    ...done.map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i[f])))
+    done.length && !mentorWait ? el("h2", { style: "margin-top:20px" }, "Done") : null,
+    ...(mentorWait ? [] : done).map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i[f])))
   ].filter(Boolean));
 }
 
@@ -193,7 +196,8 @@ function card(i, T) {
         el("p", { class: "target" }, t),
         scores,
         showWords ? (words ? el("p", { class: "muted", style: "margin-top:10px" }, `${first(i.name)} said they did this:`) : el("p", { class: "muted", style: "margin-top:10px" }, "No words from the intern this fortnight.")) : null,
-        showWords && words ? el("div", { class: "words" }, words) : null,
+        showWords && words ? el("div", { class: "words" }, words.trim()) : null,
+        showWords && i.scores && i.scores[n] ? el("p", { class: "muted" }, `${first(i.name)} scored themselves ${i.scores[n]} out of 5 (5 means on their own).`) : null,
         showWords && words ? el("div", { class: "seen" }, ...SEEN.map((s) => el("button", { type: "button", "aria-pressed": "false", onclick: pick("w", s, st, "seen", n) }, s))) : null,
         el("label", { class: "label" }, "Comment"),
         comment));
@@ -252,10 +256,10 @@ function entry(i, rec, T) {
     if (!i.targets[n]) return;
     const ev = rec["evidence" + (n + 1)], seen = rec["seen" + (n + 1)], sc = rec["score" + (n + 1)];
     const label = (T.scale.find((x) => x[0] === sc) || [, ""])[1];
-    const level = { 1: "FS", 2: "PS", 3: "MI", 4: "I", 5: "I" }[sc] || "";
+    const level = { 1: "FS", 2: "PS", 3: "MI", 4: "I", 5: "I" }[(i.scores || [])[n]] || "";   // from the intern's own score, not the team's
     const c = rec["comment" + (n + 1)]; const cm = /[.!?]$/.test(c) ? c : c + ".";
-    s += `\n\n${a.name}: ${i.targets[n]}\nScore: ${sc} out of 5 (${label}). Level of support: ${level}\nComment: ${cm}`;
-    if (ev) s += ` Intern's words: '${ev}' (${seen || "not confirmed"}).`;
+    s += `\n\n${a.name}: ${i.targets[n]}\nScore: ${sc} out of 5 (${label}).${level ? " Level of support: " + level + "." : ""}\nComment: ${cm}`;
+    if (ev) s += ` Intern's words: '${String(ev).trim()}' (${seen || "not confirmed"}).`;
     s += `\nObserved by: ${by}`;
   });
   return s;
