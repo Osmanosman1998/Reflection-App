@@ -72,15 +72,15 @@
 <script>
 // Team check page, two tabs:
 //  1. Project SEARCH team check: one per intern per fortnight (first saved wins)
-//  2. Mentor or host business review: one per intern per fortnight (first saved wins)
+//  2. Mentor review: once per half term, in the last check only (first saved wins)
 // Every target needs a score AND a comment before the check can be saved.
 const TYPES = {
   team:   { key: "team",   label: "Project SEARCH team check", saveAs: "Project SEARCH team",
             scale: [[1, "No focus"], [2, "Emerging"], [3, "Partly sustained"], [4, "Mostly sustained"], [5, "Fully sustained"]],
             help: "Score each target and write a comment. Confirm the intern's own words where they wrote some." },
-  mentor: { key: "mentor", label: "Mentor or host business review", saveAs: "Mentor or host business",
+  mentor: { key: "mentor", label: "Mentor review", saveAs: "Mentor or host business",
             scale: [[1, "Not seen yet"], [2, "Once or twice"], [3, "Sometimes"], [4, "Most of the time"], [5, "Every time"]],
-            help: "For the intern's mentor or a member of staff at the host business. How often have you seen the intern do each target in the last two weeks?" }
+            help: "Once at the end of each half term. How often have you seen the intern do each target this half term?" }
 };
 const SEEN = ["✓ Seen independently", "Seen with prompts", "Partly seen", "Not seen yet"];
 const AREAS = CONFIG.areas;
@@ -116,11 +116,11 @@ const doneField = (t) => (t === "team" ? "doneBy" : "mentorDoneBy");
 function fromFlow(b) {
   if (!b || !b.rows) return b;
   const rows = b.rows.filter((x) => x.Name && x.Active === "Yes");
-  return { name: b.name, role: b.role, site: b.site, check: (rows[0] && rows[0].Check) || "", dueBy: (rows[0] && rows[0].DueBy) || "",
+  return { name: b.name, role: b.role, site: b.site, check: (rows[0] && rows[0].Check) || "", mentorDue: (rows[0] && rows[0].MentorDue) || "", dueBy: (rows[0] && rows[0].DueBy) || "",
     interns: rows.map((x) => ({ internId: x.InternID, name: x.Name, site: x.Site, rotation: x.Rotation === "Not set" ? "" : x.Rotation,
       targets: [x.Target1, x.Target2, x.Target3, x.Target4].map((t) => t || ""),
       words: [x.Words1, x.Words2, x.Words3, x.Words4].map((t) => t || ""),
-      doneBy: x.DoneBy || "", mentorDoneBy: x.MentorDoneBy || "" })) };
+      doneBy: x.DoneBy || "", mentorDoneBy: x.MentorDoneBy || "", mentor: x.Mentor || "" })) };
 }
 
 async function load() {
@@ -137,23 +137,28 @@ async function load() {
 
 function render() {
   const T = TYPES[tab], f = doneField(tab);
-  const todo = data.interns.filter((i) => !i[f]), done = data.interns.filter((i) => i[f]);
+  // Mentor reviews: only in the last check of a half term, and only for interns with a mentor set
+  const mentorWait = tab === "mentor" && data.mentorDue === "No";
+  const noMentor = (i) => !i.mentor || /not yet set/i.test(i.mentor);
+  const pool = tab === "mentor" ? data.interns.filter((i) => !noMentor(i)) : data.interns;
+  const todo = mentorWait ? [] : pool.filter((i) => !i[f]), done = pool.filter((i) => i[f]);
   const tabs = isMentorOnly() ? null : el("div", { class: "tabs", role: "tablist" },
     ...Object.values(TYPES).map((x) => el("button", { type: "button", role: "tab", "aria-selected": String(tab === x.key),
       onclick: () => { tab = x.key; render(); } }, x.label)));
-  app.replaceChildren(
+  app.replaceChildren(...[
     el("h1", {}, T.label),
     el("p", {}, `Hello ${first(data.name)}. ${data.site === "All sites" ? "All sites" : data.site}.`),
     tabs,
     el("p", { class: "muted" }, T.help),
     data.check ? el("div", { class: "banner" }, el("b", {}, data.check), data.dueBy ? `, due by ${fmt(data.dueBy)}.` : ".",
-                    el("p", { class: "key" }, `${done.length} of ${data.interns.length} interns done. One per intern each fortnight: the first one saved counts.`))
+                    el("p", { class: "key" }, `${done.length} of ${pool.length} interns done. ${tab === "mentor" ? "One per intern each half term" : "One per intern each fortnight"}: the first one saved counts.`))
                : el("div", { class: "banner" }, "No check is due right now (holiday)."),
+    mentorWait ? el("p", { class: "muted" }, "Mentor reviews are only needed at the end of each half term. There is nothing to do yet, thank you.") : null,
     PREVIEW ? el("p", { class: "error" }, "Preview: nothing is saved.") : null,
     ...todo.map((i) => card(i, T)),
     done.length ? el("h2", { style: "margin-top:20px" }, "Done") : null,
     ...done.map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i[f])))
-  );
+  ].filter(Boolean));
 }
 
 function pick(group, value, st, key, n) {
@@ -204,6 +209,15 @@ function card(i, T) {
       });
       if (missing) { msg.replaceChildren(el("p", { class: "error" }, "Please give a score and a comment of at least 3 words for every target" + (T.key === "mentor" ? ", and your name." : "."))); return; }
       save.disabled = true; msg.replaceChildren(el("p", { class: "muted" }, "Saving…"));
+      // Recheck just before saving: has someone else already done this intern while this page was open?
+      if (!PREVIEW) {
+        try {
+          const fresh = await call(CONFIG.teamUrl, { token: code }, 15000);
+          const row = fresh.status === 200 && fromFlow(fresh.body) && (fromFlow(fresh.body).interns || []).find((x) => x.internId === i.internId);
+          const who = row && row[doneField(T.key)];
+          if (who) { i[doneField(T.key)] = who; render(); return; }
+        } catch (e) { /* no signal for the recheck: carry on and save */ }
+      }
       const rec = { token: code, id: [i.internId, data.check, T.key].join(" | "), internId: i.internId, name: i.name, site: i.site || data.site, check: data.check, reviewType: T.saveAs, reviewer: st.reviewer.trim() };
       AREAS.forEach((a, n) => {
         rec["score" + (n + 1)] = st.scores[n] || "";
@@ -230,16 +244,19 @@ function card(i, T) {
 }
 
 function entry(i, rec, T) {
+  // Laid out like an Evidence for Learning comment: Comment, Next Steps, Observed by
   const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  const by = T.key === "team" ? `Checked by ${rec.reviewer} (Project SEARCH team).` : `Reviewed by ${rec.reviewer} (mentor or host business).`;
-  let s = `${i.name}, Project SEARCH, ${d}. ${by}`;
+  const by = T.key === "team" ? `${rec.reviewer} (Project SEARCH team)` : `${rec.reviewer} (mentor)`;
+  let s = `${i.name}, ${d}`;
   AREAS.forEach((a, n) => {
     if (!i.targets[n]) return;
     const ev = rec["evidence" + (n + 1)], seen = rec["seen" + (n + 1)], sc = rec["score" + (n + 1)];
     const label = (T.scale.find((x) => x[0] === sc) || [, ""])[1];
+    const level = { 1: "FS", 2: "PS", 3: "MI", 4: "I", 5: "I" }[sc] || "";
     const c = rec["comment" + (n + 1)]; const cm = /[.!?]$/.test(c) ? c : c + ".";
-    s += `\n${a.name}: ${i.targets[n]}. Score ${sc} out of 5 (${label}). ${cm}`;
+    s += `\n\n${a.name}: ${i.targets[n]}\nScore: ${sc} out of 5 (${label}). Level of support: ${level}\nComment: ${cm}`;
     if (ev) s += ` Intern's words: '${ev}' (${seen || "not confirmed"}).`;
+    s += `\nObserved by: ${by}`;
   });
   return s;
 }
