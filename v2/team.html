@@ -57,6 +57,12 @@
     .copy { white-space: pre-wrap; background: var(--good-soft); border-radius: 10px; padding: 12px; font-size: 16px; }
     .error { background: var(--bad-soft); color: var(--bad); border-radius: 10px; padding: 10px 12px; }
     .key { font-size: 15px; }
+    .tabs { display: flex; gap: 6px; margin: 12px 0 4px; flex-wrap: wrap; }
+    .tabs button { flex: 1 1 200px; border: 2px solid var(--brand); background: var(--card); color: var(--brand); border-radius: 12px; padding: 10px 12px; font-weight: 700; min-height: 48px; }
+    .tabs button[aria-selected="true"] { background: var(--brand); color: #fff; }
+    .label { font-weight: 700; margin: 12px 0 4px; display: block; }
+    input[type=text] { width: 100%; font: inherit; border: 2px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); color: var(--ink); }
+    .need { border-color: var(--bad) !important; }
     @media (max-width: 480px) { .scores button { font-size: 12px; } }
   </style>
 </head>
@@ -64,14 +70,25 @@
 <main id="app"><p class="muted">Loading…</p></main>
 <script src="config.js?v=2.0"></script>
 <script>
-// Team check page. One check per intern per fortnight: the first one saved wins.
-const SCALE = [[1, "No focus"], [2, "Emerging"], [3, "Partly sustained"], [4, "Mostly sustained"], [5, "Fully sustained"]];
+// Team check page, two tabs:
+//  1. Project SEARCH team check: one per intern per fortnight (first saved wins)
+//  2. Mentor or host business review: one per intern per fortnight (first saved wins)
+// Every target needs a score AND a comment before the check can be saved.
+const TYPES = {
+  team:   { key: "team",   label: "Project SEARCH team check", saveAs: "Project SEARCH team",
+            scale: [[1, "No focus"], [2, "Emerging"], [3, "Partly sustained"], [4, "Mostly sustained"], [5, "Fully sustained"]],
+            help: "Score each target and write a comment. Confirm the intern's own words where they wrote some." },
+  mentor: { key: "mentor", label: "Mentor or host business review", saveAs: "Mentor or host business",
+            scale: [[1, "Not seen yet"], [2, "Once or twice"], [3, "Sometimes"], [4, "Most of the time"], [5, "Every time"]],
+            help: "For the intern's mentor or a member of staff at the host business. How often have you seen the intern do each target in the last two weeks?" }
+};
 const SEEN = ["✓ Seen independently", "Seen with prompts", "Partly seen", "Not seen yet"];
 const AREAS = CONFIG.areas;
 const app = document.getElementById("app");
 const code = (new URLSearchParams(location.search).get("t") || "").trim().toLowerCase();
 const PREVIEW = !CONFIG.teamUrl;
 let data = null;
+let tab = "team";
 
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -91,102 +108,148 @@ async function call(url, body, ms = 45000) {
   } finally { clearTimeout(t); }
 }
 const fmt = (d) => { const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }); };
+const first = (n) => String(n || "").split(" ")[0];
+const isMentorOnly = () => /mentor|host/i.test(data.role || "");
+const doneField = (t) => (t === "team" ? "doneBy" : "mentorDoneBy");
+
+// The flow sends the team member plus the rows of the hidden team list table in Excel
+function fromFlow(b) {
+  if (!b || !b.rows) return b;
+  const rows = b.rows.filter((x) => x.Name && x.Active === "Yes");
+  return { name: b.name, role: b.role, site: b.site, check: (rows[0] && rows[0].Check) || "", dueBy: (rows[0] && rows[0].DueBy) || "",
+    interns: rows.map((x) => ({ internId: x.InternID, name: x.Name, site: x.Site, rotation: x.Rotation === "Not set" ? "" : x.Rotation,
+      targets: [x.Target1, x.Target2, x.Target3, x.Target4].map((t) => t || ""),
+      words: [x.Words1, x.Words2, x.Words3, x.Words4].map((t) => t || ""),
+      doneBy: x.DoneBy || "", mentorDoneBy: x.MentorDoneBy || "" })) };
+}
 
 async function load() {
   if (!code && !PREVIEW) { app.replaceChildren(el("h1", {}, "Team check"), el("p", {}, "Please open this page from your team QR code or link.")); return; }
-  if (PREVIEW) { data = demo(); return render(); }
+  if (PREVIEW) { data = demo(); if (isMentorOnly()) tab = "mentor"; return render(); }
   try {
-    const r = await call(CONFIG.teamUrl, { teamCode: code });
+    const r = await call(CONFIG.teamUrl, { token: code });
     if (r.status === 404 || r.status === 403) { app.replaceChildren(el("h1", {}, "Team check"), el("p", {}, "This code is not recognised. Please ask Osman for your link.")); return; }
-    data = r.body; render();
+    data = fromFlow(r.body); if (isMentorOnly()) tab = "mentor"; render();
   } catch (e) {
     app.replaceChildren(el("h1", {}, "Team check"), el("p", { class: "error" }, "Could not connect. Check your internet and try again."), el("button", { class: "btn", onclick: load }, "Try again"));
   }
 }
 
 function render() {
-  const todo = data.interns.filter((i) => !i.doneBy), done = data.interns.filter((i) => i.doneBy);
+  const T = TYPES[tab], f = doneField(tab);
+  const todo = data.interns.filter((i) => !i[f]), done = data.interns.filter((i) => i[f]);
+  const tabs = isMentorOnly() ? null : el("div", { class: "tabs", role: "tablist" },
+    ...Object.values(TYPES).map((x) => el("button", { type: "button", role: "tab", "aria-selected": String(tab === x.key),
+      onclick: () => { tab = x.key; render(); } }, x.label)));
   app.replaceChildren(
-    el("h1", {}, "Team check"),
-    el("p", {}, `Hello ${data.name.split(" ")[0]}. ${data.site === "All sites" ? "All sites" : data.site}.`),
+    el("h1", {}, T.label),
+    el("p", {}, `Hello ${first(data.name)}. ${data.site === "All sites" ? "All sites" : data.site}.`),
+    tabs,
+    el("p", { class: "muted" }, T.help),
     data.check ? el("div", { class: "banner" }, el("b", {}, data.check), data.dueBy ? `, due by ${fmt(data.dueBy)}.` : ".",
-                    el("p", { class: "key" }, `${done.length} of ${data.interns.length} interns checked. One check per intern: the first one saved counts.`))
+                    el("p", { class: "key" }, `${done.length} of ${data.interns.length} interns done. One per intern each fortnight: the first one saved counts.`))
                : el("div", { class: "banner" }, "No check is due right now (holiday)."),
     PREVIEW ? el("p", { class: "error" }, "Preview: nothing is saved.") : null,
-    ...todo.map(card),
+    ...todo.map((i) => card(i, T)),
     done.length ? el("h2", { style: "margin-top:20px" }, "Done") : null,
-    ...done.map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i.doneBy)))
+    ...done.map((i) => el("div", { class: "card row" }, el("span", {}, el("b", {}, i.name)), el("span", { class: "pill done" }, "Done by " + i[f])))
   );
 }
 
-function card(i) {
-  const st = { scores: {}, seen: {}, comment: "" };
+function pick(group, value, st, key, n) {
+  return (e) => { st[key][n] = value; [...e.currentTarget.parentNode.children].forEach((b) => b.setAttribute("aria-pressed", String(b === e.currentTarget))); };
+}
+
+function card(i, T) {
+  const st = { scores: {}, seen: {}, comments: {}, reviewer: T.key === "team" ? data.name : "" };
   const box = el("section", { class: "card" });
-  const head = el("div", { class: "row" }, el("h2", {}, i.name), el("span", { class: "pill" }, "Due"));
-  const open = el("button", { class: "btn ghost", onclick: () => { open.remove(); box.append(form()); } }, "Start check");
-  box.append(head, el("p", { class: "muted" }, i.rotation || ""), open);
+  const open = el("button", { class: "btn ghost", onclick: () => { open.remove(); box.append(form()); } }, T.key === "team" ? "Start check" : "Start review");
+  box.append(el("div", { class: "row" }, el("h2", {}, i.name), el("span", { class: "pill" }, "Due")), el("p", { class: "muted" }, i.rotation || ""), open);
 
   function form() {
     const f = el("div");
+    const fields = [];   // [{n, kind, node}] for the "please fill" check
+    if (T.key === "mentor") {
+      const who = el("input", { type: "text", placeholder: "Your name and job title", oninput: (e) => (st.reviewer = e.target.value) });
+      f.append(el("label", { class: "label" }, "Who is giving this review?"), who);
+      fields.push({ kind: "reviewer", node: who });
+    }
     AREAS.forEach((a, n) => {
       const t = i.targets[n]; if (!t) return;
-      const btns = SCALE.map(([v, label]) => el("button", { type: "button", "aria-pressed": "false",
-        onclick: (e) => { st.scores[n] = v; [...e.currentTarget.parentNode.children].forEach((b) => b.setAttribute("aria-pressed", b === e.currentTarget)); } },
-        el("b", {}, v), label));
+      const scores = el("div", { class: "scores", role: "group", "aria-label": "Score" },
+        ...T.scale.map(([v, label]) => el("button", { type: "button", "aria-pressed": "false", onclick: pick("s", v, st, "scores", n) }, el("b", {}, v), label)));
       const words = (i.words && i.words[n]) || "";
-      const seen = words ? el("div", { class: "seen" }, ...SEEN.map((s) => el("button", { type: "button", "aria-pressed": "false",
-        onclick: (e) => { st.seen[n] = s; [...e.currentTarget.parentNode.children].forEach((b) => b.setAttribute("aria-pressed", b === e.currentTarget)); } }, s))) : null;
+      const showWords = T.key === "team";
+      const comment = el("textarea", { placeholder: T.key === "team" ? "Comment (needed): what did you see?" : "Comment (needed): what did you see the intern do?",
+        oninput: (e) => (st.comments[n] = e.target.value) });
+      fields.push({ n, kind: "score", node: scores }, { n, kind: "comment", node: comment });
       f.append(el("div", { class: "area" },
         el("div", { class: "area-title" }, `${a.icon} ${a.name}`),
         el("p", { class: "target" }, t),
-        el("div", { class: "scores", role: "group", "aria-label": "Score" }, ...btns),
-        words ? el("p", { class: "muted", style: "margin-top:10px" }, `${i.name.split(" ")[0]} said they did this:`) : el("p", { class: "muted", style: "margin-top:10px" }, "No words from the intern this fortnight."),
-        words ? el("div", { class: "words" }, words) : null,
-        seen));
+        scores,
+        showWords ? (words ? el("p", { class: "muted", style: "margin-top:10px" }, `${first(i.name)} said they did this:`) : el("p", { class: "muted", style: "margin-top:10px" }, "No words from the intern this fortnight.")) : null,
+        showWords && words ? el("div", { class: "words" }, words) : null,
+        showWords && words ? el("div", { class: "seen" }, ...SEEN.map((s) => el("button", { type: "button", "aria-pressed": "false", onclick: pick("w", s, st, "seen", n) }, s))) : null,
+        el("label", { class: "label" }, "Comment"),
+        comment));
     });
-    const ta = el("textarea", { placeholder: "Comment (optional)", oninput: (e) => (st.comment = e.target.value) });
     const msg = el("div");
     const save = el("button", { class: "btn", onclick: async () => {
-      const need = AREAS.map((a, n) => n).filter((n) => i.targets[n] && !st.scores[n]);
-      if (need.length) { msg.replaceChildren(el("p", { class: "error" }, "Please give a score for every target.")); return; }
+      let missing = 0;
+      fields.forEach((x) => {
+        const ok = x.kind === "reviewer" ? st.reviewer.trim().length > 2
+                 : x.kind === "score" ? !!st.scores[x.n]
+                 : (st.comments[x.n] || "").trim().split(/\s+/).filter(Boolean).length >= 3;
+        x.node.classList.toggle("need", !ok); if (!ok) missing++;
+      });
+      if (missing) { msg.replaceChildren(el("p", { class: "error" }, "Please give a score and a comment of at least 3 words for every target" + (T.key === "mentor" ? ", and your name." : "."))); return; }
       save.disabled = true; msg.replaceChildren(el("p", { class: "muted" }, "Saving…"));
-      const rec = { teamCode: code, internId: i.internId, check: data.check, comment: st.comment.trim() };
-      AREAS.forEach((a, n) => { rec["score" + (n + 1)] = st.scores[n] || ""; rec["evidence" + (n + 1)] = (i.words && i.words[n]) || ""; rec["seen" + (n + 1)] = st.seen[n] || ""; });
+      const rec = { token: code, id: [i.internId, data.check, T.key].join(" | "), internId: i.internId, name: i.name, site: i.site || data.site, check: data.check, reviewType: T.saveAs, reviewer: st.reviewer.trim() };
+      AREAS.forEach((a, n) => {
+        rec["score" + (n + 1)] = st.scores[n] || "";
+        rec["comment" + (n + 1)] = (st.comments[n] || "").trim();
+        rec["evidence" + (n + 1)] = T.key === "team" ? ((i.words && i.words[n]) || "") : "";
+        rec["seen" + (n + 1)] = st.seen[n] || "";
+      });
       let r;
       if (PREVIEW) r = { status: 200, body: {} };
       else { try { r = await call(CONFIG.saveCheckUrl, rec); } catch (e) { r = { status: 0 }; } }
-      if (r.status === 409) { i.doneBy = r.body.doneBy || "someone else"; render(); return; }
+      if (r.status === 409) { i[doneField(T.key)] = r.body.doneBy || "someone else"; render(); return; }
       if (r.status !== 200) { save.disabled = false; msg.replaceChildren(el("p", { class: "error" }, "Not saved. Check your internet and press Save again.")); return; }
-      i.doneBy = data.name;
+      i[doneField(T.key)] = rec.reviewer || data.name;
+      const text = entry(i, rec, T);
       box.replaceChildren(el("div", { class: "row" }, el("h2", {}, i.name), el("span", { class: "pill done" }, "Saved")),
         el("p", {}, "Copy this into Evidence for Learning (it is also on the Evidence for Learning tab in Excel):"),
-        el("div", { class: "copy" }, entry(i, rec)),
-        el("button", { class: "btn ghost", style: "margin-top:10px", onclick: (e) => { navigator.clipboard && navigator.clipboard.writeText(entry(i, rec)); e.target.textContent = "Copied"; } }, "Copy"));
-    } }, "Save check");
-    f.append(el("div", { class: "area" }, ta), msg, el("div", { style: "margin-top:12px" }, save));
+        el("div", { class: "copy" }, text),
+        el("button", { class: "btn ghost", style: "margin-top:10px", onclick: (e) => { navigator.clipboard && navigator.clipboard.writeText(text); e.target.textContent = "Copied"; } }, "Copy"));
+    } }, T.key === "team" ? "Save check" : "Save review");
+    f.append(msg, el("div", { style: "margin-top:12px" }, save));
     return f;
   }
   return box;
 }
 
-function entry(i, rec) {
+function entry(i, rec, T) {
   const d = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  let s = `${i.name}, Project SEARCH, ${d}. Checked by ${data.name}.`;
+  const by = T.key === "team" ? `Checked by ${rec.reviewer} (Project SEARCH team).` : `Reviewed by ${rec.reviewer} (mentor or host business).`;
+  let s = `${i.name}, Project SEARCH, ${d}. ${by}`;
   AREAS.forEach((a, n) => {
     if (!i.targets[n]) return;
-    const ev = rec["evidence" + (n + 1)], seen = rec["seen" + (n + 1)];
-    s += `\n${a.name}: ${ev ? `'${ev}' (${seen || "not confirmed"}). ` : ""}Team score ${rec["score" + (n + 1)]} out of 5.`;
+    const ev = rec["evidence" + (n + 1)], seen = rec["seen" + (n + 1)], sc = rec["score" + (n + 1)];
+    const label = (T.scale.find((x) => x[0] === sc) || [, ""])[1];
+    const c = rec["comment" + (n + 1)]; const cm = /[.!?]$/.test(c) ? c : c + ".";
+    s += `\n${a.name}: ${i.targets[n]}. Score ${sc} out of 5 (${label}). ${cm}`;
+    if (ev) s += ` Intern's words: '${ev}' (${seen || "not confirmed"}).`;
   });
-  if (rec.comment) s += `\nComment: ${rec.comment}`;
   return s;
 }
 
 function demo() {
-  return { name: "Helen Gillan", site: "QMUL", check: "Autumn 2 2026, check 1", dueBy: new Date(Date.now() + 5 * 864e5).toISOString(),
+  return { name: "Helen Gillan", role: "Site lead", site: "QMUL", check: "Autumn 2 2026, check 1", dueBy: new Date(Date.now() + 5 * 864e5).toISOString(),
     interns: [
       { internId: "PS001", name: "Alex (example)", rotation: "Post room", targets: ["Ask for help when I am stuck at work", "Travel to placement on my own", "Drink water and eat lunch at break", "Say good morning to my team"],
         words: ["I asked when I was not sure where a letter went", "I travelled on my own", "", "I said good morning to my team"] },
-      { internId: "PS004", name: "Priya (example)", rotation: "Library", targets: ["Follow a three step instruction", "", "", ""], words: ["", "", "", ""] },
+      { internId: "PS004", name: "Priya (example)", rotation: "Library", targets: ["Follow a three step instruction", "", "", ""], words: ["", "", "", ""], mentorDoneBy: "Sam Lee (Library supervisor)" },
       { internId: "PS002", name: "Jordan (example)", doneBy: "Arthur Davis", targets: [] }
     ] };
 }

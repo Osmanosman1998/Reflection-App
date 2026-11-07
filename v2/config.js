@@ -14,8 +14,8 @@ const CONFIG = {
   // Flow 2, "Reflection app: save reflection"
   submitUrl: "https://defaulte5b166d191cc45aaaaebd5b9deb798.a3.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/03/workflows/1eaf625c62344164a8f4b3c6d00c81e3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=8ususLYokw3PMdE6LUpt3B4d230r53EYhxosQ40GDpA",
   // Team check page: "Reflection app: team list" and "Reflection app: save check"
-  teamUrl: "",
-  saveCheckUrl: "",
+  teamUrl: "https://defaulte5b166d191cc45aaaaebd5b9deb798.a3.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/13/workflows/01cce40bdefa47af88a5660c57ecdc61/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=IIt1hjFfuhZWSbtetMx-GjtOlX3Vgt8nSMox0DOcZ60",
+  saveCheckUrl: "https://defaulte5b166d191cc45aaaaebd5b9deb798.a3.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/05/workflows/08838a90fb814992bc108eaf87975514/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=cD5aS-6EFyFtAqVeJQSWpIAzbdn7QrWoxZhDm-Hxi78",
 
   // How long to wait for Power Automate before saving on the phone instead (milliseconds)
   profileTimeoutMs: 30000,
